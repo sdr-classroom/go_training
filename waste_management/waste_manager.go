@@ -23,10 +23,69 @@ type wasteManager struct {
 	isRecyclable RecyclingCriterion
 	recycler     Recycler
 
-	// TODO
+	newRecycler       chan Recycler
+	newWasteCriterion chan RecyclingCriterion
+	scraps            chan Scrap
+	recyclables       chan Scrap
+	recycledGoods     chan RecycledGood
+	waste             chan Waste
 }
 
 func NewWasteManager(isRecyclable RecyclingCriterion, recycler Recycler) WasteManager {
-	// TODO
-	return nil
+	d := &wasteManager{
+		isRecyclable:      isRecyclable,
+		recycler:          recycler,
+		newRecycler:       make(chan Recycler),
+		newWasteCriterion: make(chan RecyclingCriterion),
+		scraps:            make(chan Scrap, 1000),
+		recyclables:       make(chan Scrap),
+		recycledGoods:     make(chan RecycledGood),
+		waste:             make(chan Waste),
+	}
+	go d.process()
+	go d.recycle()
+	return d
+}
+
+func (m *wasteManager) recycle() {
+	for scrap := range m.recyclables {
+		m.recycledGoods <- m.recycler(scrap)
+	}
+}
+
+func (m *wasteManager) process() {
+	for {
+		select {
+		case scrap := <-m.scraps:
+			if isRec, w := m.isRecyclable(scrap); !isRec {
+				m.waste <- w
+			} else {
+				m.recyclables <- scrap
+			}
+		case criterion := <-m.newWasteCriterion:
+			m.isRecyclable = criterion
+		case recycler := <-m.newRecycler:
+			m.recycler = recycler
+		}
+	}
+}
+
+func (m *wasteManager) ChangeRecyclingCriterion(isWaste RecyclingCriterion) {
+	m.newWasteCriterion <- isWaste
+}
+
+func (m *wasteManager) ChangeRecycler(recycler Recycler) {
+	m.newRecycler <- recycler
+}
+
+func (m *wasteManager) Process(scrap Scrap) {
+	m.scraps <- scrap
+}
+
+func (m *wasteManager) NextRecycledGood() RecycledGood {
+	return <-m.recycledGoods
+}
+
+func (m *wasteManager) NextWaste() Waste {
+	return <-m.waste
 }
